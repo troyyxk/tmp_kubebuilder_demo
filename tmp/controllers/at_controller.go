@@ -21,12 +21,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	cnatv1alpha1 "cnat/api/v1alpha1"
 	"cnat/pkg/schedule"
@@ -36,7 +36,6 @@ import (
 // AtReconciler reconciles a At object
 type AtReconciler struct {
 	client.Client
-	Log    logr.Logger
 	Scheme *runtime.Scheme
 }
 
@@ -55,7 +54,8 @@ type AtReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.13.0/pkg/reconcile
 func (r *AtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	// reqLogger := r.Log.WithValues("at", req.NamespacedName)
-	fmt.Println("=== Reconciling At")
+	log := log.FromContext(ctx)
+	log.Info("=== Reconciling At")
 
 	// your logic here
 
@@ -80,7 +80,7 @@ func (r *AtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 	// state transition PENDING -> RUNNING -> DONE
 	switch instance.Status.Phase {
 	case cnatv1alpha1.PhasePending:
-		fmt.Println("Phase: PENDING")
+		log.Info("Phase: PENDING")
 
 		diff, err := schedule.TimeUntilSchedule(instance.Spec.Schedule)
 		if err != nil {
@@ -89,18 +89,18 @@ func (r *AtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 			return ctrl.Result{}, err
 		}
 
-		fmt.Println("Schedule parsing done", "Result", fmt.Sprintf("%v", diff))
+		log.Info("Schedule parsing done", "Result", fmt.Sprintf("%v", diff))
 
 		if diff > 0 {
 			// not yet time to execute, wait until scheduled time
 			return ctrl.Result{RequeueAfter: diff * time.Second}, nil
 		}
 
-		fmt.Println("It's time!", "Ready to execute", instance.Spec.Command)
+		log.Info("It's time!", "Ready to execute", instance.Spec.Command)
 		// change state
 		instance.Status.Phase = cnatv1alpha1.PhaseRunning
 	case cnatv1alpha1.PhaseRunning:
-		fmt.Println("Phase: RUNNING")
+		log.Info("Phase: RUNNING")
 
 		pod := spawn.NewPodForCR(instance)
 		err := ctrl.SetControllerReference(instance, pod, r.Scheme)
@@ -120,7 +120,7 @@ func (r *AtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 			}
 
 			// Successfully created a Pod
-			fmt.Println("Pod Created successfully", "name", pod.Name)
+			log.Info("Pod Created successfully", "name", pod.Name)
 			return ctrl.Result{}, nil
 		} else if err != nil {
 			// requeue with err
@@ -129,9 +129,9 @@ func (r *AtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 		} else if query.Status.Phase == corev1.PodFailed ||
 			query.Status.Phase == corev1.PodSucceeded {
 			// pod already finished or errored out`
-			fmt.Println("Container terminated", "reason")
-			fmt.Println(query.Status.Reason)
-			fmt.Println(query.Status.Message)
+			log.Info("Container terminated", "reason")
+			log.Info(query.Status.Reason)
+			log.Info(query.Status.Message)
 			instance.Status.Phase = cnatv1alpha1.PhaseDone
 		} else {
 			// don't requeue, it will happen automatically when
@@ -139,11 +139,11 @@ func (r *AtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 			return ctrl.Result{}, nil
 		}
 	case cnatv1alpha1.PhaseDone:
-		fmt.Println("Phase: DONE")
+		log.Info("Phase: DONE")
 		// reconcile without requeuing
 		return ctrl.Result{}, nil
 	default:
-		// fmt.Println("NOP")
+		// log.Info("NOP")
 		return ctrl.Result{}, nil
 	}
 
